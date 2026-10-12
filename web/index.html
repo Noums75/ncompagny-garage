@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Aegis — Enterprise Garages</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="app" class="app hidden">
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><span class="mark-line"></span><span class="mark-stem"></span></div>
+          <div class="brand-wordmark"><strong>AEGIS<span class="brand-dot">.</span></strong><small>FLEET MANAGEMENT</small></div>
+        </div>
+        <div class="nav-section-label">ESPACE DE TRAVAIL</div>
+        <nav id="nav-primary" class="nav-stack" aria-label="Navigation principale"></nav>
+        <div class="nav-section-label nav-label-second">MES GARAGES</div>
+        <nav id="nav-garages" class="nav-stack garages-navigation" aria-label="Garages accessibles"></nav>
+        <div class="sidebar-bottom">
+          <div class="status-line"><span class="online-dot"></span><span>Système opérationnel</span></div>
+          <div class="profile-card">
+            <div id="avatar" class="avatar">AG</div>
+            <div class="profile-text"><strong id="profile-name">—</strong><span id="profile-job">—</span></div>
+            
+          </div>
+        </div>
+      </aside>
+      <section class="workspace">
+        <header class="topbar">
+          <div class="breadcrumb"><span>ESPACE ENTREPRISE</span><span class="breadcrumb-sep">/</span><strong id="breadcrumb-current">Tableau de bord</strong></div>
+          <div class="top-actions">
+            <span id="role-chip" class="role-chip">MEMBRE</span>
+            <button id="refresh-button" class="icon-button" type="button" aria-label="Actualiser" title="Actualiser"></button>
+            <button id="close-button" class="icon-button close-button" type="button" aria-label="Fermer" title="Fermer"></button>
+          </div>
+        </header>
+        <div id="operation-status" class="operation-status hidden" role="status"></div>
+        <div id="scroll-content" class="content-scroll"><div id="content"></div></div>
+      </section>
+    </div>
+    <div id="modal-layer" class="modal-layer hidden"></div>
+    <div id="toast-area" class="toast-area" aria-live="polite"></div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
