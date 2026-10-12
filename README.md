@@ -48,11 +48,3 @@ Pour importer un véhicule, se placer au volant près du garage. Sa plaque et so
 - `Config.SyncOwnedVehicleStored` : synchronisation de `owned_vehicles.stored`. Mettre `false` si cette colonne n’existe pas dans votre schéma.
 
 Les autres ressources de garage doivent exclure les plaques gérées par cette flotte.
-
-## Tests
-
-Avec Lua 5.4, `luac` et Node.js dans le PATH :
-
-```powershell
-powershell -File tests/run.ps1
-```
