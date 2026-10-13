@@ -235,7 +235,8 @@ local function encodeProperties(input, plate, model)
         visited[value] = true
         for key, child in pairs(value) do
             count = count + 1
-            if count > 1500 or (type(key) ~= 'string' and not integer(key, 1, 1500))
+            -- okokGarage's documented ESX properties include wheel arrays indexed from 0.
+            if count > 1500 or (type(key) ~= 'string' and not integer(key, 0, 1500))
                 or (type(key) == 'string' and #key > 64) or not valid(child, depth + 1) then return false end
         end
         return true
@@ -626,6 +627,8 @@ local function fleetBootstrap(sourceId, player, job, scope)
         staffView = staff and selected == nil,
         playerJob = job.name,
         grade = tonumber(job.grade) or 0,
+        bridge = { enabled = EnterpriseGarageBridge.enabled(),
+            allowEmployeeOwned = EnterpriseGarageBridge.enabled() and Config.OkokGarageBridge.AllowEmployeeOwnedVehicles == true },
         playerLabel = GetPlayerName(sourceId) or 'Employé'
     })
 end
@@ -636,6 +639,10 @@ end
 
 local function societyOwned(jobName, plate)
     local rows = MySQL.query.await('SELECT owner, vehicle FROM owned_vehicles WHERE UPPER(TRIM(plate)) = ?', { plate })
+    if type(rows) == 'table' and #rows == 0 then
+        local archived = EnterpriseGarageBridge.owned(plate)
+        if archived then rows = { archived } end
+    end
     if type(rows) ~= 'table' or #rows ~= 1 then return false end
     local row = rows[1]
     for _, format in ipairs(Config.SocietyOwnerFormats) do
@@ -646,6 +653,7 @@ end
 
 local function ownedStoredQuery(jobName, plate, stored)
     if Config.SyncOwnedVehicleStored == false then return nil end
+    if MySQL.scalar.await('SELECT 1 FROM aegis_enterprise_vehicle_bridges WHERE plate = ? LIMIT 1', { plate }) then return nil end
     local marks, values = {}, { stored, plate }
     for _, format in ipairs(Config.SocietyOwnerFormats) do
         marks[#marks + 1] = '?'; values[#values + 1] = format:format(jobName)
@@ -783,12 +791,19 @@ local function actionDelete(sourceId, player, job, data)
     if not garage or not isAdmin(sourceId, player) then return fail('Suppression réservée au staff serveur.') end
     local out = MySQL.scalar.await('SELECT 1 FROM aegis_enterprise_fleet WHERE garage_id = ? AND stored = 0 LIMIT 1', { garage.id })
     if out then return fail('Tous les véhicules doivent être rangés avant suppression.') end
-    local vehicles = MySQL.query.await('SELECT plate FROM aegis_enterprise_fleet WHERE garage_id = ?', { garage.id }) or {}
+    local vehicles = MySQL.query.await('SELECT plate, props FROM aegis_enterprise_fleet WHERE garage_id = ?', { garage.id }) or {}
     if not samePlayer(sourceId, player) or not isAdmin(sourceId, player) then return fail('Autorisation expirée.') end
-    transaction({
-        { query = 'INSERT IGNORE INTO aegis_enterprise_retired_keys (plate) SELECT plate FROM aegis_enterprise_fleet WHERE garage_id = ?', values = { garage.id } },
-        { query = 'DELETE FROM aegis_enterprise_garages WHERE id = ?', values = { garage.id } }
-    })
+    local queries = {}
+    for _, vehicle in ipairs(vehicles) do
+        local restore, restoreError = EnterpriseGarageBridge.releaseQueries(vehicle.plate, vehicle.props)
+        if not restore then return fail(restoreError) end
+        for _, query in ipairs(restore) do queries[#queries + 1] = query end
+    end
+    queries[#queries + 1] =
+        { query = 'INSERT IGNORE INTO aegis_enterprise_retired_keys (plate) SELECT plate FROM aegis_enterprise_fleet WHERE garage_id = ?', values = { garage.id } }
+    queries[#queries + 1] = { query = 'DELETE FROM aegis_enterprise_garages WHERE id = ?', values = { garage.id } }
+    if not samePlayer(sourceId, player) or not isAdmin(sourceId, player) then return fail('Autorisation expirée.') end
+    transaction(queries)
     reloadGarages(); broadcastRefresh()
     for _, item in ipairs(vehicles) do distributePlate(garage.job, item.plate, false) end
     return success({ message = 'Garage et flotte supprimés.' })
@@ -813,14 +828,15 @@ local function actionRegister(sourceId, player, job, data)
     local vehicleType = validVehicleType(GetVehicleType(entity))
     if not plate or not label or not vehicleType then return fail('Véhicule ou nom invalide.') end
     if type(props) ~= 'table' or not sameModel(props.model, GetEntityModel(entity)) then return fail('Modèle non conforme au véhicule observé.') end
-    local owned, ownership = societyOwned(garage.job, plate)
-    if not owned then
-        return fail('Ce véhicule n’est pas immatriculé au nom de la société dans owned_vehicles.')
+    if MySQL.scalar.await('SELECT 1 FROM aegis_enterprise_fleet WHERE plate = ?', { plate }) then return fail('Cette plaque est déjà associée à une flotte.') end
+    local ownershipRows = MySQL.query.await('SELECT * FROM owned_vehicles WHERE UPPER(TRIM(plate)) = ?', { plate }) or {}
+    local ownership = #ownershipRows == 1 and ownershipRows[1] or nil
+    if not ownership or not EnterpriseGarageBridge.canImport(player, garage.job, ownership) then
+        return fail('Ce véhicule doit appartenir à la société ou à toi dans owned_vehicles.')
     end
     local registeredModel = safeDecode(ownership.vehicle).model
     if not sameModel(registeredModel, GetEntityModel(entity)) then return fail('Le modèle ne correspond pas à owned_vehicles.') end
     if #matchingEntities(plate) ~= 1 then return fail('Une autre entité utilise déjà cette plaque. Corrige le doublon avant import.') end
-    if MySQL.scalar.await('SELECT 1 FROM aegis_enterprise_fleet WHERE plate = ?', { plate }) then return fail('Cette plaque est déjà associée à une flotte.') end
     local serialized = encodeProperties(props, plate, GetEntityModel(entity))
     if not serialized then return fail('Personnalisation du véhicule invalide ou trop volumineuse.') end
     local total = MySQL.scalar.await('SELECT COUNT(*) FROM aegis_enterprise_fleet WHERE garage_id = ?', { garage.id }) or 0
@@ -836,14 +852,24 @@ local function actionRegister(sourceId, player, job, data)
     local model = GetEntityModel(entity)
     if not stillAuthorized(sourceId, player, garage, 'fleet_add') or GetPlayerRoutingBucket(sourceId) ~= bucket
         or not entityMatches(entity, { plate = plate, model = model }, bucket) or GetPedInVehicleSeat(entity, -1) ~= ped then return fail('Le véhicule ou ton autorisation a changé.') end
-    local queries = { { query = [[INSERT INTO aegis_enterprise_fleet (garage_id, plate, model, vehicle_type, label, props, stored, net_id)
-        VALUES (?, ?, ?, ?, ?, ?, 0, ?)]], values = { garage.id, plate, tostring(model), vehicleType, label, serialized, netId } } }
+    local bridged = EnterpriseGarageBridge.enabled()
+    local queries = {}
+    if bridged then queries[#queries + 1] = EnterpriseGarageBridge.captureQuery(plate, ownership) end
+    local insertValues = { garage.id, plate, tostring(model), vehicleType, label, serialized, netId }
+    if bridged then insertValues[#insertValues + 1] = plate end
+    queries[#queries + 1] = { query = [[INSERT INTO aegis_enterprise_fleet (garage_id, plate, model, vehicle_type, label, props, stored, net_id)
+        ]] .. (bridged and [[SELECT ?, ?, ?, ?, ?, ?, 0, ? FROM aegis_enterprise_vehicle_bridges WHERE plate = ?]]
+            or [[VALUES (?, ?, ?, ?, ?, ?, 0, ?)]]),
+        values = insertValues }
     if categoryId > 0 then
-        queries[#queries + 1] = { query = 'INSERT INTO aegis_enterprise_vehicle_categories (vehicle_id, category_id) VALUES (LAST_INSERT_ID(), ?)', values = { categoryId } }
+        queries[#queries + 1] = { query = 'INSERT INTO aegis_enterprise_vehicle_categories (vehicle_id, category_id) SELECT id, ? FROM aegis_enterprise_fleet WHERE plate = ?', values = { categoryId, plate } }
     end
+    if bridged then queries[#queries + 1] = EnterpriseGarageBridge.reserveQuery(plate) end
     queries[#queries + 1] = { query = 'DELETE FROM aegis_enterprise_retired_keys WHERE plate = ?', values = { plate } }
-    commitFleet(queries, garage, plate, 0)
+    if bridged then transaction(queries) else commitFleet(queries, garage, plate, 0) end
     local id = MySQL.scalar.await('SELECT id FROM aegis_enterprise_fleet WHERE plate = ?', { plate })
+    if not id then return fail('La propriété du véhicule a changé pendant le transfert. Réessaie.') end
+    if bridged then EnterpriseGarageBridge.revokeSourceKeys(plate) end
     FleetEntities[id] = entity
     if not entityMatches(entity, { plate = plate, model = model }, bucket) then return fail('Le véhicule a changé pendant l’import. Utilise la récupération si nécessaire.') end
     if not deleteVehicle(entity) then
@@ -854,7 +880,7 @@ local function actionRegister(sourceId, player, job, data)
     FleetEntities[id] = nil
     distributePlate(garage.job, plate, false)
     broadcastRefresh()
-    return success({ id = id, message = 'Véhicule importé et rangé dans la flotte.' })
+    return success({ id = id, message = bridged and 'Véhicule transféré depuis le garage externe et rangé dans la flotte.' or 'Véhicule importé et rangé dans la flotte.' })
 end
 
 local function spawnIsBlocked(coords, bucket)
@@ -893,8 +919,12 @@ local function withdrawInternal(sourceId, player, job, data)
         if not chosen then return fail('Tous les points de sortie sont occupés.') end
     end
     local owned, ownership = societyOwned(garage.job, vehicle.plate)
+    if not owned then
+        ownership = EnterpriseGarageBridge.owned(vehicle.plate)
+        owned = ownership ~= nil
+    end
     if not owned or not sameModel(safeDecode(ownership.vehicle).model, modelHash(vehicle.model)) then
-        return fail('Ce véhicule n’appartient plus à la société dans owned_vehicles.')
+        return fail('La propriété enregistrée de ce véhicule ne correspond plus à la flotte.')
     end
     if #matchingEntities(vehicle.plate) > 0 then return fail('Cette plaque existe déjà en jeu. Range le véhicule présent.') end
     if not stillAuthorized(sourceId, player, garage, 'withdraw') or GetPlayerRoutingBucket(sourceId) ~= bucket
@@ -978,6 +1008,14 @@ local function actionStore(sourceId, player, job, data)
     local plate = validPlate(GetVehicleNumberPlateText(entity))
     if not plate then return fail('Plaque invalide.') end
     local vehicle = MySQL.single.await('SELECT * FROM aegis_enterprise_fleet WHERE garage_id = ? AND plate = ?', { garage.id, plate })
+    if not vehicle and data.vehicleId == nil and EnterpriseGarageBridge.enabled()
+        and Config.OkokGarageBridge.AutoImportOnStore == true then
+        if not stillAuthorized(sourceId, player, garage, 'store') then return fail('Autorisation de rangement expirée.') end
+        return actionRegister(sourceId, player, job, {
+            garageId = garage.id, netId = netId, props = data.props,
+            label = limitText(data.label, Config.MaxVehicleLabel) or ('Véhicule ' .. plate), categoryId = 0
+        })
+    end
     if not vehicle or tonumber(vehicle.stored) ~= 0 then return fail('Ce véhicule ne fait pas partie des véhicules sortis de ce garage.') end
     if data.vehicleId ~= nil and tonumber(data.vehicleId) ~= tonumber(vehicle.id) then return fail('Tu n’es pas au volant du véhicule sélectionné.') end
     if not categoryPermitted(sourceId, player, job, garage, categoryOf(vehicle.id, garage.id), 'store') then return fail('Ton grade ne permet pas de ranger cette catégorie.') end
@@ -1028,14 +1066,16 @@ local function actionRemove(sourceId, player, job, data)
     if not vehicle then return fail('Véhicule introuvable.') end
     if tonumber(vehicle.stored) ~= 1 then return fail('Range ou récupère le véhicule avant sa suppression.') end
     if not stillAuthorized(sourceId, player, garage, 'fleet_remove') then return fail('Autorisation expirée.') end
-    transaction({
-        { query = 'INSERT IGNORE INTO aegis_enterprise_retired_keys (plate) VALUES (?)', values = { vehicle.plate } },
-        { query = 'DELETE FROM aegis_enterprise_fleet WHERE id = ? AND stored = 1', values = { vehicle.id } }
-    })
+    local queries, restoreError = EnterpriseGarageBridge.releaseQueries(vehicle.plate, vehicle.props)
+    if not queries then return fail(restoreError) end
+    queries[#queries + 1] = { query = 'INSERT IGNORE INTO aegis_enterprise_retired_keys (plate) VALUES (?)', values = { vehicle.plate } }
+    queries[#queries + 1] = { query = 'DELETE FROM aegis_enterprise_fleet WHERE id = ? AND stored = 1', values = { vehicle.id } }
+    if not stillAuthorized(sourceId, player, garage, 'fleet_remove') then return fail('Autorisation expirée.') end
+    transaction(queries)
     FleetEntities[tonumber(vehicle.id)] = nil
     distributePlate(garage.job, vehicle.plate, false)
     broadcastRefresh()
-    return success({ message = 'Véhicule retiré de la flotte.' })
+    return success({ message = 'Véhicule retiré de la flotte et rendu à son garage d’origine si transféré.' })
 end
 
 local function actionAddPoint(sourceId, player, job, data)
@@ -1258,6 +1298,7 @@ CreateThread(function()
     while not Ready do
     local initialized, initializeError = pcall(function()
     EnterpriseGarageDatabase.ensure()
+    EnterpriseGarageBridge.ensure()
     reloadGarages()
     local outside = MySQL.query.await('SELECT id, plate, model FROM aegis_enterprise_fleet WHERE stored = 0') or {}
     for _, vehicle in ipairs(outside) do

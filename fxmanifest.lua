@@ -10,7 +10,8 @@ ui_page 'web/index.html'
 files {
     'web/index.html',
     'web/styles.css',
-    'web/app.js'
+    'web/app.js',
+    'web/preview.js'
 }
 
 shared_scripts {
@@ -18,12 +19,14 @@ shared_scripts {
 }
 
 client_scripts {
+    'client/properties.lua',
     'client/main.lua'
 }
 
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'server/database.lua',
+    'server/bridge.lua',
     'server/main.lua'
 }
 

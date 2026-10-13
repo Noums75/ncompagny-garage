@@ -30,6 +30,14 @@ CREATE TABLE IF NOT EXISTS `aegis_enterprise_fleet` (
     REFERENCES `aegis_enterprise_garages` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `aegis_enterprise_vehicle_bridges` (
+  `plate` VARCHAR(8) NOT NULL,
+  `source_resource` VARCHAR(64) NOT NULL,
+  `original_record` LONGTEXT NOT NULL,
+  `imported_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`plate`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `aegis_enterprise_retired_keys` (
   `plate` VARCHAR(8) NOT NULL,
   `retired_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -94,6 +94,7 @@
   const e = escape;
 
   async function request(name, data={}) {
+    if (!IS_FIVEM && window.EnterpriseGaragePreview) return window.EnterpriseGaragePreview.request(name, data);
     if (!IS_FIVEM) return {ok:false,error:'Cette interface doit être ouverte depuis FiveM.'};
     const epoch = uiEpoch, controller = new AbortController();
     controllers.add(controller);
@@ -154,6 +155,9 @@
 
   function renderFleet(g) {
     const n=vehicleCounts(g.vehicles||[]), q=searchText(state.search.trim());
+    const bridgeNotice=state.data.bridge?.enabled
+      ? `Les véhicules de société${state.data.bridge.allowEmployeeOwned?' et vos véhicules personnels autorisés':''} peuvent être transférés depuis okokGarage. Ils rejoignent la flotte partagée ; leur propriétaire est conservé et le retrait les rend à leur garage d’origine.`
+      : 'Seuls les véhicules enregistrés au nom de l’entreprise peuvent être importés. Le retrait de la flotte ne supprime pas le véhicule possédé.';
     const vehicles=(g.vehicles||[]).filter(v=>searchText(`${v.label} ${v.plate} ${v.model} ${catName(g,v)}`).includes(q)
       && (state.statusFilter==='all'||(state.statusFilter==='stored'?v.stored:!v.stored))
       && (state.categoryFilter==='all'||String(v.category_id||0)===state.categoryFilter));
@@ -164,7 +168,7 @@
       <div class="toolbar"><div class="search-wrap">${icon('search')}<input class="search-input" id="fleet-search" type="search" value="${e(state.search)}" placeholder="Véhicule, plaque ou catégorie…" maxlength="60"></div>
       <div class="toolbar-actions"><select class="filter-control" id="fleet-category"><option value="all">Toutes les catégories</option><option value="0" ${state.categoryFilter==='0'?'selected':''}>Sans catégorie</option>${(g.categories||[]).map(c=>`<option value="${c.id}" ${state.categoryFilter===String(c.id)?'selected':''}>${e(c.name)}</option>`).join('')}</select><select class="filter-control" id="fleet-filter"><option value="all" ${state.statusFilter==='all'?'selected':''}>Tous les statuts</option><option value="stored" ${state.statusFilter==='stored'?'selected':''}>Au garage</option><option value="out" ${state.statusFilter==='out'?'selected':''}>En circulation</option></select></div></div>
       <p class="filter-summary" role="status">${vehicles.length} véhicule${vehicles.length>1?'s':''} affiché${vehicles.length>1?'s':''} sur ${n.total}${q || state.statusFilter!=='all' || state.categoryFilter!=='all'?' · filtres actifs <button type="button" class="mini-link" data-action="clear-filters">Effacer les filtres</button>':''}</p><div class="fleet-panel">${vehicles.length?`<div class="table-scroll"><table><thead><tr><th>Véhicule</th><th>Immatriculation</th><th>Catégorie</th><th>État</th><th style="text-align:right">Actions</th></tr></thead><tbody>${vehicles.map(v=>vehicleRow(g,v)).join('')}</tbody></table></div>`:empty(n.total?'Aucun résultat pour ces filtres':'La flotte est vide',n.total?'Effacez les filtres pour retrouver l’inventaire complet.':g.abilities.fleet_add?'Importez un véhicule de société pour constituer la flotte.':'Votre responsable peut ajouter des véhicules à cette flotte.','search')}
-      <div class="fleet-footnote">${icon('info')} Seuls les véhicules enregistrés au nom de l’entreprise peuvent être importés. Le retrait de la flotte ne supprime pas le véhicule possédé.</div></div>
+      <div class="fleet-footnote">${icon('info')} ${e(bridgeNotice)}</div></div>
       <div class="notice-card"><div class="notice-icon">${icon('key')}</div><div><strong>Clés partagées par entreprise</strong><p>Chaque véhicule sorti n’accorde ses clés qu’aux employés autorisés par les droits d’accès du garage ET de sa catégorie. Les permissions sont revérifiées côté serveur.</p></div></div>`;
   }
 
@@ -299,8 +303,8 @@
       <div class="modal-scroll"><form id="withdraw-form"><div class="field"><label>Emplacement de sortie</label><select class="input" name="pointId"><option value="0">Automatique · premier point libre</option>${(g.spawnPoints||[]).map(p=>`<option value="${p.id}">${e(p.label)} · ${e(formatCoords(p.coords))}</option>`).join('')}</select></div></form><div class="hint-box">Si tu choisis « Automatique », un emplacement libre sera sélectionné côté serveur.</div></div>${footer('confirm-withdraw','Sortir le véhicule')}`;}
     if(m.type==='rename'){const v=g.vehicles.find(x=>+x.id===+m.vehicleId);return `${header('Renommer le véhicule',v?.plate||'Véhicule')}<div class="modal-scroll"><form id="rename-form" class="field-grid">${field('label','Nom affiché dans le garage',v?.label||'','text','maxlength="60" required')}</form><p class="form-help">La plaque et le modèle ne changent pas.</p></div>${footer('confirm-rename','Enregistrer le nom')}`;}
     if(m.type==='assign'){const v=g.vehicles.find(x=>+x.id===+m.vehicleId);return `${header('Classer le véhicule',v?.plate||'Véhicule')}<div class="modal-scroll"><form id="assign-form"><div class="field"><label>Catégorie du véhicule</label>${categorySelect(g,v?.category_id)}</div></form><div class="hint-box">Les permissions de la nouvelle catégorie s’appliqueront immédiatement.</div></div>${footer('confirm-assign','Classer le véhicule')}`;}
-    if(m.type==='register')return `${header('Importer un véhicule possédé','Le véhicule doit être enregistré au nom de votre société.')}
-      <div class="modal-scroll">${!m.vehicle?`<div class="hint-box">Place-toi près du véhicule de société, ou directement au volant. La plaque et la personnalisation seront récupérées.</div><button class="button primary" data-action="scan-vehicle">${icon('search')} Détecter le véhicule</button>`:
+    if(m.type==='register')return `${header('Importer depuis un garage externe','Véhicule de société ou personnel autorisé : le transfert le rend disponible à la flotte partagée.')}
+      <div class="modal-scroll">${!m.vehicle?`<div class="hint-box">Sors le véhicule d’okokGarage et installe-toi au volant près de ce garage. La plaque et la personnalisation seront récupérées.</div><button class="button primary" data-action="scan-vehicle">${icon('search')} Détecter le véhicule</button>`:
       `<div class="hint-box">${icon('check')} Véhicule détecté : <strong>${e(m.vehicle.plate)}</strong>. L’import le rangera et supprimera son instance du monde.</div><form id="register-form" class="field-grid">${field('label','Nom affiché',m.vehicle.label,'text','maxlength="60" required')}<div class="field"><label>Catégorie de garage</label>${g.abilities.assign_category?categorySelect(g,0):'<span class="form-help">Sans catégorie · classement non autorisé pour ton grade</span>'}</div></form>`}</div><div class="modal-footer"><button class="button" data-action="modal-close">Annuler</button>${m.vehicle?`<button class="button primary" data-action="confirm-register">${icon('upload')} Importer dans la flotte</button>`:''}</div>`;
     const titles={remove:'Retirer ce véhicule ?',recover:'Récupérer ce véhicule ?',delete:'Supprimer ce garage ?',deletePoint:'Supprimer ce point ?',deleteCategory:'Supprimer cette catégorie ?'};
     const messages={remove:'Retire ce véhicule de la flotte du garage, sans supprimer sa propriété. Le véhicule doit être rangé.',recover:'Uniquement si le véhicule a disparu (redémarrage ou despawn), sans duplication d’un véhicule encore présent.',delete:'Le garage et sa flotte seront supprimés. Tous les véhicules doivent être rangés.',deletePoint:'Ce point de sortie ou de rangement sera supprimé. Un point de chaque type doit rester disponible.',deleteCategory:'Les véhicules de cette catégorie seront automatiquement déplacés vers « Sans catégorie ».'};
@@ -440,6 +444,7 @@
       if(msg.sessionId!==undefined&&activeSession!==null&&Number(msg.sessionId)<activeSession)return;
       invalidateSession(msg.sessionId===undefined?null:Number(msg.sessionId));
       state.visible=true;state.loading=IS_FIVEM;state.loadError='';state.view='overview';state.modal=null;
+      state.search='';state.statusFilter='all';state.categoryFilter='all';state.tab='fleet';state.selectedId=null;
       state.pendingSelectedId=msg.selectedId?Number(msg.selectedId):null;
       if(IS_FIVEM){state.data=blankData();state.selectedId=null;}
       $('#app').classList.remove('hidden');render();return;
@@ -459,4 +464,5 @@
     if(msg.type==='captureStart')$('#app').classList.add('hidden');
     if(msg.type==='captureEnd')$('#app').classList.remove('hidden');
   });
+  if (!IS_FIVEM && window.EnterpriseGaragePreview) window.EnterpriseGaragePreview.open();
 })();

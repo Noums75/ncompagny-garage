@@ -31,6 +31,16 @@ Config.AdminGroups = { 'admin', 'superadmin' }
 Config.AdminAce = 'enterprise_garage.admin'
 
 Config.SocietyOwnerFormats = { 'society_%s', 'society:%s', '%s' }
+Config.OkokGarageBridge = {
+    Enabled = true,
+    ResourceName = 'okokGarage',
+    EventPrefix = 'okokGarage', -- Config.EventPrefix documenté côté okokGarage
+    RevokeSourceKeys = true,
+    AutoImportOnStore = true,
+    -- Un employé ayant fleet_add peut confier son propre véhicule à la flotte.
+    -- Le propriétaire reste inchangé et sera restauré lors du retrait.
+    AllowEmployeeOwnedVehicles = true
+}
 Config.DefaultPermissions = {
     access = 0,
     withdraw = 0,

@@ -456,6 +456,11 @@ RegisterNUICallback('storeCurrent', function(data, cb)
         vehicleId = data.vehicleId,
         uiSession = session,
         netId = netId,
+        label = (function()
+            local name = GetDisplayNameFromVehicleModel(GetEntityModel(vehicle))
+            local localized = GetLabelText(name)
+            return localized and localized ~= 'NULL' and localized or name
+        end)(),
         props = properties
     }, sessionCallback(session, cb))
 end)
@@ -508,7 +513,7 @@ AddStateBagChangeHandler('aegisFleetInit', nil, function(bagName, key, payload)
             if vehicle ~= 0 and DoesEntityExist(vehicle) and NetworkGetEntityOwner(vehicle) == PlayerId() then
                 local data = GetStateBagValue(bagName, key)
                 if not data or type(data.props) ~= 'table' then return end
-                local applied = pcall(ESX.Game.SetVehicleProperties, vehicle, data.props)
+                local applied = pcall(ESX.Game.SetVehicleProperties, vehicle, EnterpriseGarageProperties.forApply(data.props))
                 if not applied then return end
                 if data.plate then SetVehicleNumberPlateText(vehicle, data.plate) end
                 SetVehicleOnGroundProperly(vehicle)
